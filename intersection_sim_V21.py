@@ -32,6 +32,7 @@ RIGHT_PROBABILITY = 0.5 #Probability that a car that is turning will turn right
 SELF_DRIVING_PROBABILITY = 0.5 #Probability a new car is self driving
 MEAN_ARRIVAL_TIME = 15
 PRINT_EVENTS = True
+AMBULANCE = True
 HUMAN_STOP_TIME = 5 # All of the following values should be adjusted to the desired times
 SELF_DRIVEN_STOP_TIME = 4
 STRAIGHT_CLEAR_TIME = 10
@@ -102,6 +103,10 @@ class EventQueue:
         event = self.events.pop(min_index) 
         #print("Removing event: " + event.type + ", clock: " + str(event.time))
         return event
+    
+    def insert(self, index, element):
+        self.events.insert(index, element)
+
 
 
 class Simulation:
@@ -125,7 +130,9 @@ class Simulation:
         self.events = EventQueue()
         self.generate_arrival() #generate a car arriving at the intersection
         self.print_events = PRINT_EVENTS
+        self.random_emergency() #generate a random ambulance
         self.data = []
+
 
     #Enable printing events as the simulation runs
     def enable_print_events(self):
@@ -136,6 +143,16 @@ class Simulation:
         while self.num_of_arrivals <= self.total_arrivals:
             # print("Executing new event: ")
             self.execute_next_event()
+
+    #Generate a random emergency vehicle
+    def random_emergency(self):
+        directions = [N, W, S, E]
+        random_direction = random.choice(directions)
+        rand_time = random.randint(10, 2*MEAN_ARRIVAL_TIME)
+        new_emergency_event = Event(ARRIVAL, rand_time, random_direction , "ambulance")
+        self.events.insert(0, new_emergency_event) #add emergency vehicle to the front of queue
+        
+
             
     #Execute the next event in the queue
     #(Get next event, and execute appropriate method depending on event type)
@@ -151,6 +168,11 @@ class Simulation:
 
     #Driver leaving intersection event
     def execute_departure(self, event):
+
+        if event.extra_info == "ambulance":
+            if self.print_events: 
+                print("ambulance is departing")
+                self.depart_from(event.direction, event.extra_info)
 
         #Lots of "traffic logic" below. It's just a counter-clockwise round-robin.
         if event.direction == N or event.direction == S:
@@ -194,44 +216,63 @@ class Simulation:
 
 
     #Create departure event for the first driver from the queue in the passed direction
-    def depart_from(self, direction):
+    def depart_from(self, direction, vehicle = None):
+
         
         #Make departure event for first car in North queue
         if direction == N or direction == S:
             if(self.vertical): 
                 clear_time = self.clock + self.vertical[0].get_clear_time()
-                new_event = Event(DEPARTURE, clear_time, N)
+                new_event = Event(DEPARTURE, clear_time, N) 
+                self.events.add_event(new_event)
 
-                while len(self.vertical) != 0:  #pop everything in one direction 
-                    driver = self.vertical.pop(0) #Car progessing into the intersection
+
+                if vehicle == "ambulance":
+                    print("ambulance is passing through")
+                    driver = self.vertical.pop(0)
                     driver.elapsed_time = clear_time - driver.arrival_time #how long it takes for the driver to clear the intersection
                     self.data.append(driver.elapsed_time) 
-
-                if self.print_events: 
-                    print("all drivers in vertical direction are passing through")
                     self.print_state()
 
+                else: 
+                    while len(self.vertical) != 0:  #pop everything in one direction 
+                        driver = self.vertical.pop(0) #Car progessing into the intersection
+                        driver.elapsed_time = clear_time - driver.arrival_time #how long it takes for the driver to clear the intersection
+                        self.data.append(driver.elapsed_time) 
+
+                    if self.print_events: 
+                        print("all drivers in vertical direction are passing through")
+                        self.print_state()
 
 
         #Make departure event for first car in East queue 
-        if direction == E or direction == W:
+        else :
+            
             if(self.horizontal): 
                 clear_time = self.clock + self.horizontal[0].get_clear_time()
                 new_event = Event(DEPARTURE, clear_time, E)
+                self.events.add_event(new_event)
 
-            
-                while len(self.horizontal) != 0:  #pop everything in one direction 
-                    driver = self.horizontal.pop(0) #Car progessing into the intersection
+
+                if vehicle == "ambulance":
+                    print("ambulance is passing through")
+                    driver = self.horizontal.pop(0)
                     driver.elapsed_time = clear_time - driver.arrival_time #how long it takes for the driver to clear the intersection
-                    self.data.append(driver.elapsed_time)
-             
-                
-                if self.print_events: 
-                    print("all drivers in horizontal direction are passing through")
+                    self.data.append(driver.elapsed_time) 
                     self.print_state()
+                else:
+                    while len(self.horizontal) != 0:  #pop everything in one direction 
+                        driver = self.horizontal.pop(0) #Car progessing into the intersection
+                        driver.elapsed_time = clear_time - driver.arrival_time #how long it takes for the driver to clear the intersection
+                        self.data.append(driver.elapsed_time)
+                
+                    
+                    if self.print_events: 
+                        print("all drivers in horizontal direction are passing through")
+                        self.print_state()
             
         
-        self.events.add_event(new_event)
+        # self.events.add_event(new_event)
         # print("adding (next?) departure event to queue")
         self.intersection_free = False
         # print("intersection free set to false")
@@ -281,55 +322,72 @@ class Simulation:
     #Start arrival event 
     def execute_arrival(self, event):
 
+        
         if self.print_events:
             print(str(self.clock)+ ": A driver arrives from the " + event.direction + ".")
 
-        if random.random() < SELF_DRIVING_PROBABILITY:
-            driver_type = SELF_DRIVEN
+        if event.extra_info == "ambulance":
+            driver = Driver(self.num_of_arrivals, self.clock, HUMAN_DRIVER, event.direction, event.extra_info)
+            if(event.direction == N or event.direction == S):
+                self.vertical.append(driver)
+            else: 
+                self.horizontal.append(driver)
+
+            if self.print_events:
+                print("AMBULANCE IN THE INTERSECTION")
+                
+
+            new_event = Event(DEPARTURE, self.clock, event.direction, "ambulance") #ambulances don't need to stop, create a departure event
+            self.events.add_event(new_event)
+
         else:
-            driver_type = HUMAN_DRIVER
-        driver = Driver(self.num_of_arrivals, self.clock, driver_type, event.direction, event.extra_info)
+            if random.random() < SELF_DRIVING_PROBABILITY:
+                driver_type = SELF_DRIVEN
+            else:
+                driver_type = HUMAN_DRIVER
+            driver = Driver(self.num_of_arrivals, self.clock, driver_type, event.direction, event.extra_info)
 
-        if event.direction == N:
-            if self.vertical == []: #Car needs to stop before clearing
-                self.vertical_ready = False
-            self.vertical.append(driver)
-            if self.print_events:
-                self.print_state()
-            new_event = Event(STOP, self.clock + driver.get_stop_time(), N)
-            # print("adding stop event")
-            self.events.add_event(new_event)
 
-        elif event.direction == S:
-            if self.vertical == []: #Car needs to stop before clearing
-                self.vertical_ready = False
-            self.vertical.append(driver)
-            if self.print_events:
-                self.print_state()
-            new_event = Event(STOP, self.clock + driver.get_stop_time(), S)
-            # print("adding stop event")
-            self.events.add_event(new_event)
-        
+            if event.direction == N:
+                if self.vertical == []: #Car needs to stop before clearing
+                    self.vertical_ready = False
+                self.vertical.append(driver)
+                if self.print_events:
+                    self.print_state()
+                new_event = Event(STOP, self.clock + driver.get_stop_time(), N)
+                # print("adding stop event")
+                self.events.add_event(new_event)
+
+            elif event.direction == S:
+                if self.vertical == []: #Car needs to stop before clearing
+                    self.vertical_ready = False
+                self.vertical.append(driver)
+                if self.print_events:
+                    self.print_state()
+                new_event = Event(STOP, self.clock + driver.get_stop_time(), S)
+                # print("adding stop event")
+                self.events.add_event(new_event)
             
-        elif event.direction == E:
-            if self.horizontal == []: #Car needs to stop before clearing
-                self.horizontal_ready = False
-            self.horizontal.append(driver)
-            if self.print_events:
-                self.print_state()
-            new_event = Event(STOP, self.clock + driver.get_stop_time(), E)
-            # print("adding stop event")
-            self.events.add_event(new_event)
+                
+            elif event.direction == E:
+                if self.horizontal == []: #Car needs to stop before clearing
+                    self.horizontal_ready = False
+                self.horizontal.append(driver)
+                if self.print_events:
+                    self.print_state()
+                new_event = Event(STOP, self.clock + driver.get_stop_time(), E)
+                # print("adding stop event")
+                self.events.add_event(new_event)
 
-        elif event.direction == W:
-            if self.horizontal == []: #Car needs to stop before clearing
-                self.horizontal_ready = False
-            self.horizontal.append(driver)
-            if self.print_events:
-                self.print_state()
-            new_event = Event(STOP, self.clock + driver.get_stop_time(), W)
-            # print("adding stop event")
-            self.events.add_event(new_event)
+            elif event.direction == W:
+                if self.horizontal == []: #Car needs to stop before clearing
+                    self.horizontal_ready = False
+                self.horizontal.append(driver)
+                if self.print_events:
+                    self.print_state()
+                new_event = Event(STOP, self.clock + driver.get_stop_time(), W)
+                # print("adding stop event")
+                self.events.add_event(new_event)
             
         self.generate_arrival() #Generate the next arrival
 
@@ -359,6 +417,7 @@ class Simulation:
         else: #From West
             self.events.add_event(Event(ARRIVAL, time, W, destination))
         self.num_of_arrivals += 1 #Needed for the simulation to terminate
+
     
 
     def print_state(self):
@@ -389,7 +448,8 @@ class Simulation:
             f.write(str(driver.name) + "," + str(driver.type) + "," + str(driver.arrival_time) + "," + str(driver.elapsed_time) + "," + str(driver.source) + "," + str(driver.destination) + "\n")
         f.close()
 
-#Graph of average clear time vs number of arrivals on the system
+
+#Client request: Graph the average travel time as a function of the load of the system
 def makeClearTimeGraph():
     numOfArrivals = 0 
     avg_clear = []
